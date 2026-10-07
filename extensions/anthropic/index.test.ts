@@ -19,6 +19,38 @@ vi.mock("./cli-auth-seam.js", () => {
 import anthropicPlugin from "./index.js";
 
 describe("anthropic provider replay hooks", () => {
+  it("resolves Haiku 5.5 against the older catalog and enables adaptive thinking", async () => {
+    const provider = await registerSingleProviderPlugin(anthropicPlugin);
+    const template = {
+      id: "claude-haiku-4-5",
+      name: "Haiku 4.5",
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com",
+      reasoning: false,
+      input: ["text", "image"],
+      contextWindow: 200000,
+      maxTokens: 64000,
+      cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+    };
+    const model = provider.resolveDynamicModel?.({
+      provider: "anthropic",
+      modelId: "claude-haiku-5-5",
+      modelRegistry: {
+        find: (_provider: string, id: string) => (id === template.id ? template : null),
+      },
+    } as never);
+    expect(model).toMatchObject({
+      id: "claude-haiku-5-5",
+      reasoning: true,
+      contextWindow: 1000000,
+      maxTokens: 128000,
+      cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    });
+    expect(provider.resolveDefaultThinkingLevel?.({ modelId: "claude-haiku-5-5" } as never)).toBe(
+      "adaptive",
+    );
+  });
   it("registers the claude-cli backend", async () => {
     const captured = capturePluginRegistration({ register: anthropicPlugin.register });
 
@@ -146,7 +178,7 @@ describe("anthropic provider replay hooks", () => {
       "claude-cli/claude-opus-4-6": {},
       "claude-cli/claude-opus-4-5": {},
       "claude-cli/claude-sonnet-4-5": {},
-      "claude-cli/claude-haiku-4-5": {},
+      "claude-cli/claude-haiku-5-5": {},
     });
   });
 

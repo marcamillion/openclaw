@@ -1,5 +1,10 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
-import { streamSimple } from "@mariozechner/pi-ai";
+import {
+  createAssistantMessageEventStream,
+  streamSimple,
+  type AssistantMessage,
+  type Usage,
+} from "@mariozechner/pi-ai";
 import type { ProviderWrapStreamFnContext } from "openclaw/plugin-sdk/plugin-entry";
 import {
   applyAnthropicPayloadPolicyToParams,
@@ -109,7 +114,7 @@ export function resolveAnthropicBetas(
   if (extraParams?.context1m === true) {
     if (isAnthropic1MModel(modelId)) {
       betas.add(ANTHROPIC_CONTEXT_1M_BETA);
-    } else {
+    } else if (modelId.trim().toLowerCase() !== "claude-haiku-5-5") {
       log.warn(`ignoring context1m for non-opus/sonnet model: anthropic/${modelId}`);
     }
   }
@@ -219,6 +224,105 @@ export function resolveAnthropicServiceTier(
   return normalized;
 }
 
+// The catalog SDK predates Haiku 5.5. Apply its native payload and usage contract here.
+export function priceHaikuUsage(usage: Usage, cacheTtl: "5m" | "1h" = "5m"): void {
+  const longPrompt = usage.input + usage.cacheRead + usage.cacheWrite > 100_000;
+  const input = longPrompt ? 0.5 : 0.1;
+  const output = longPrompt ? 2.5 : 0.5;
+  const cacheRead = longPrompt ? 0.05 : 0.01;
+  const cacheWrite = input * (cacheTtl === "1h" ? 2 : 1.25);
+  usage.cost = {
+    input: (usage.input * input) / 1_000_000,
+    output: (usage.output * output) / 1_000_000,
+    cacheRead: (usage.cacheRead * cacheRead) / 1_000_000,
+    cacheWrite: (usage.cacheWrite * cacheWrite) / 1_000_000,
+    total: 0,
+  };
+  usage.cost.total =
+    usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
+}
+
+function createHaikuStreamWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+  const underlying = baseStreamFn ?? streamSimple;
+  return (model, context, options) => {
+    if (model.id !== "claude-haiku-5-5" || model.api !== "anthropic-messages") {
+      return underlying(model, context, options);
+    }
+    let cacheTtl: "5m" | "1h" = "5m";
+    const source = streamWithPayloadPatch(underlying, model, context, options, (payload) => {
+      delete payload.temperature;
+      delete payload.top_p;
+      delete payload.top_k;
+      payload.thinking = { type: options?.reasoning ? "adaptive" : "disabled" };
+      if (options?.reasoning) {
+        payload.output_config = {
+          ...(payload.output_config as Record<string, unknown> | undefined),
+          effort: options.reasoning === "minimal" ? "low" : options.reasoning,
+        };
+      }
+      // The older SDK adds a thinking budget to max_tokens. Adaptive uses the caller's ceiling.
+      if (options?.maxTokens !== undefined) {
+        payload.max_tokens = options.maxTokens;
+      }
+      const visit = (value: unknown): void => {
+        if (!value || typeof value !== "object") {
+          return;
+        }
+        const object = value as Record<string, unknown>;
+        const control = object.cache_control as Record<string, unknown> | undefined;
+        if (control?.ttl === "1h") {
+          cacheTtl = "1h";
+        }
+        for (const nested of Object.values(object)) {
+          visit(nested);
+        }
+      };
+      visit(payload);
+    });
+    const output = createAssistantMessageEventStream();
+    void (async () => {
+      try {
+        const stream = await source;
+        for await (const event of stream) {
+          const message =
+            event.type === "done"
+              ? event.message
+              : event.type === "error"
+                ? event.error
+                : event.partial;
+          priceHaikuUsage(message.usage, cacheTtl);
+          output.push(event);
+        }
+        const final = await stream.result();
+        priceHaikuUsage(final.usage, cacheTtl);
+        output.end(final);
+      } catch (error) {
+        const failed: AssistantMessage = {
+          role: "assistant",
+          content: [],
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          timestamp: Date.now(),
+          stopReason: "error",
+          errorMessage: String(error),
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        };
+        output.push({ type: "error", reason: "error", error: failed });
+        output.end(failed);
+      }
+    })();
+    return output;
+  };
+}
+
 export function wrapAnthropicProviderStream(
   ctx: ProviderWrapStreamFnContext,
 ): StreamFn | undefined {
@@ -227,6 +331,7 @@ export function wrapAnthropicProviderStream(
   const fastMode = resolveAnthropicFastMode(ctx.extraParams);
   return composeProviderStreamWrappers(
     ctx.streamFn,
+    ctx.modelId === "claude-haiku-5-5" ? createHaikuStreamWrapper : undefined,
     anthropicBetas?.length
       ? (streamFn) => createAnthropicBetaHeadersWrapper(streamFn, anthropicBetas)
       : undefined,

@@ -1,7 +1,13 @@
 import type { StreamFn } from "@mariozechner/pi-agent-core";
+import {
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+  type Usage,
+} from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __testing,
+  priceHaikuUsage,
   createAnthropicBetaHeadersWrapper,
   createAnthropicFastModeWrapper,
   createAnthropicServiceTierWrapper,
@@ -29,6 +35,116 @@ function runWrapper(apiKey: string | undefined): Record<string, string> | undefi
 describe("anthropic stream wrappers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("adapts Haiku 5.5 payloads without losing an explicit output limit or tool choice", () => {
+    const captured: { payload?: Record<string, unknown> } = {};
+    const base: StreamFn = (model, _context, options) => {
+      const payload = {
+        temperature: 0,
+        top_p: 0.9,
+        top_k: 5,
+        max_tokens: 8192,
+        thinking: { type: "enabled", budget_tokens: 4096 },
+        tool_choice: { type: "any" },
+      };
+      options?.onPayload?.(payload as never, model as never);
+      captured.payload = payload;
+      return createAssistantMessageEventStream();
+    };
+    const wrapped = wrapAnthropicProviderStream({
+      streamFn: base,
+      modelId: "claude-haiku-5-5",
+    } as never);
+    wrapped?.(
+      { id: "claude-haiku-5-5", provider: "anthropic", api: "anthropic-messages" } as never,
+      {} as never,
+      { maxTokens: 2048, reasoning: "medium" } as never,
+    );
+    expect(captured.payload).toMatchObject({
+      max_tokens: 2048,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium" },
+      tool_choice: { type: "any" },
+    });
+    for (const key of ["temperature", "top_p", "top_k"]) {
+      expect(captured.payload).not.toHaveProperty(key);
+    }
+    expect(captured.payload?.thinking).not.toHaveProperty("budget_tokens");
+  });
+
+  it("explicitly disables Haiku 5.5 thinking when the caller turns it off", () => {
+    let payload: Record<string, unknown> = {};
+    const base: StreamFn = (model, _context, options) => {
+      options?.onPayload?.(payload as never, model as never);
+      return createAssistantMessageEventStream();
+    };
+    const wrapped = wrapAnthropicProviderStream({
+      streamFn: base,
+      modelId: "claude-haiku-5-5",
+    } as never);
+    wrapped?.(
+      { id: "claude-haiku-5-5", provider: "anthropic", api: "anthropic-messages" } as never,
+      {} as never,
+      {} as never,
+    );
+    expect(payload).toMatchObject({ thinking: { type: "disabled" } });
+  });
+
+  it.each([
+    [100_000, 0, 0, "5m", 0.0105],
+    [99_999, 1, 1, "5m", 0.052500175],
+    [0, 100_001, 0, "5m", 0.00750005],
+    [0, 0, 100_001, "5m", 0.065000625],
+    [0, 0, 100_000, "1h", 0.0205],
+    [0, 0, 100_001, "1h", 0.102501],
+  ] as const)(
+    "prices the entire prompt tier with cache classes (%i/%i/%i, %s)",
+    (input, cacheRead, cacheWrite, ttl, expected) => {
+      const usage = { input, output: 1000, cacheRead, cacheWrite } as Usage;
+      priceHaikuUsage(usage, ttl);
+      expect(usage.cost.total).toBeCloseTo(expected, 10);
+    },
+  );
+
+  it("reports corrected costs through both streamed events and result()", async () => {
+    const message: AssistantMessage = {
+      role: "assistant",
+      content: [],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "claude-haiku-5-5",
+      timestamp: 0,
+      stopReason: "stop",
+      usage: {
+        input: 100001,
+        output: 1000,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 101001,
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, total: 2 },
+      },
+    };
+    const base: StreamFn = async () => {
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: "done", reason: "stop", message });
+      stream.end(message);
+      return stream;
+    };
+    const wrapped = wrapAnthropicProviderStream({
+      streamFn: base,
+      modelId: "claude-haiku-5-5",
+    } as never)!;
+    const stream = await wrapped(
+      { id: "claude-haiku-5-5", provider: "anthropic", api: "anthropic-messages" } as never,
+      {} as never,
+    );
+    for await (const event of stream) {
+      if (event.type === "done") {
+        expect(event.message.usage.cost.total).toBeCloseTo(0.0525005, 10);
+      }
+    }
+    expect((await stream.result()).usage.cost.total).toBeCloseTo(0.0525005, 10);
   });
 
   it("strips context-1m for Claude CLI or legacy token auth and warns", () => {

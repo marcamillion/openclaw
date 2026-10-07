@@ -11,6 +11,7 @@ OpenProse is a programming language for AI sessions. LLMs are simulators—when 
 ## OpenClaw Runtime Mapping
 
 - **Task tool** in the upstream spec == OpenClaw `sessions_spawn`
+- Resolve Prose `model: haiku` to `anthropic/claude-haiku-5-5` when calling `sessions_spawn`. Preserve explicit model overrides.
 - **File I/O** == OpenClaw `read`/`write`
 - **Remote fetch** == OpenClaw `web_fetch` (or `exec` with curl when POST is required)
 

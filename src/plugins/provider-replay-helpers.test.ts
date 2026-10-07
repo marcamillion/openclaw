@@ -59,6 +59,7 @@ describe("provider replay helpers", () => {
       "claude-sonnet-4-5-20250929",
       "claude-sonnet-4-6",
       "claude-haiku-4-5-20251001",
+      "claude-haiku-5-5",
     ]) {
       const policy = buildAnthropicReplayPolicyForModel(modelId);
       expect(policy).not.toHaveProperty("dropThinkingBlocks");

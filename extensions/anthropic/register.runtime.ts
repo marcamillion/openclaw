@@ -50,13 +50,14 @@ const ANTHROPIC_MODERN_MODEL_PREFIXES = [
   "claude-opus-4-5",
   "claude-sonnet-4-5",
   "claude-haiku-4-5",
+  "claude-haiku-5-5",
 ] as const;
 const _ANTHROPIC_OAUTH_ALLOWLIST = [
   "anthropic/claude-sonnet-4-6",
   "anthropic/claude-opus-4-6",
   "anthropic/claude-opus-4-5",
   "anthropic/claude-sonnet-4-5",
-  "anthropic/claude-haiku-4-5",
+  "anthropic/claude-haiku-5-5",
 ] as const;
 const ANTHROPIC_SETUP_TOKEN_NOTE_LINES = [
   "Anthropic setup-token auth is supported in OpenClaw.",
@@ -226,6 +227,25 @@ function resolveAnthropic46ForwardCompatModel(params: {
 function resolveAnthropicForwardCompatModel(
   ctx: ProviderResolveDynamicModelContext,
 ): ProviderRuntimeModel | undefined {
+  if (ctx.modelId.trim().toLowerCase() === "claude-haiku-5-5") {
+    return cloneFirstTemplateModel({
+      providerId: PROVIDER_ID,
+      modelId: "claude-haiku-5-5",
+      templateIds: ["claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-haiku-4.5"],
+      ctx,
+      patch: {
+        name: "Claude Haiku 5.5",
+        provider:
+          ctx.provider.trim().toLowerCase() === CLAUDE_CLI_BACKEND_ID
+            ? CLAUDE_CLI_BACKEND_ID
+            : PROVIDER_ID,
+        reasoning: true,
+        contextWindow: 1_000_000,
+        maxTokens: 128_000,
+        cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+      },
+    });
+  }
   return (
     resolveAnthropic46ForwardCompatModel({
       ctx,
@@ -374,7 +394,7 @@ export function registerAnthropicPlugin(api: OpenClawPluginApi): void {
     "anthropic/claude-opus-4-6",
     "anthropic/claude-opus-4-5",
     "anthropic/claude-sonnet-4-5",
-    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-haiku-5-5",
   ] as const;
   api.registerCliBackend(buildAnthropicCliBackend());
   api.registerProvider({
@@ -471,7 +491,8 @@ export function registerAnthropicPlugin(api: OpenClawPluginApi): void {
       (modelId.toLowerCase().startsWith(ANTHROPIC_OPUS_46_MODEL_ID) ||
         modelId.toLowerCase().startsWith(ANTHROPIC_OPUS_46_DOT_MODEL_ID) ||
         modelId.toLowerCase().startsWith(ANTHROPIC_SONNET_46_MODEL_ID) ||
-        modelId.toLowerCase().startsWith(ANTHROPIC_SONNET_46_DOT_MODEL_ID))
+        modelId.toLowerCase().startsWith(ANTHROPIC_SONNET_46_DOT_MODEL_ID) ||
+        modelId.trim().toLowerCase() === "claude-haiku-5-5")
         ? "adaptive"
         : undefined,
     resolveUsageAuth: async (ctx) => await ctx.resolveOAuthToken(),
