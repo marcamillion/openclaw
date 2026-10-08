@@ -8,7 +8,7 @@ export const CLAUDE_CLI_DEFAULT_ALLOWLIST_REFS = [
   `${CLAUDE_CLI_BACKEND_ID}/claude-opus-4-6`,
   `${CLAUDE_CLI_BACKEND_ID}/claude-opus-4-5`,
   `${CLAUDE_CLI_BACKEND_ID}/claude-sonnet-4-5`,
-  `${CLAUDE_CLI_BACKEND_ID}/claude-haiku-4-5`,
+  `${CLAUDE_CLI_BACKEND_ID}/claude-haiku-5-5`,
 ] as const;
 
 export const CLAUDE_CLI_MODEL_ALIASES: Record<string, string> = {
@@ -28,7 +28,9 @@ export const CLAUDE_CLI_MODEL_ALIASES: Record<string, string> = {
   "claude-sonnet-4-5": "sonnet",
   "claude-sonnet-4-1": "sonnet",
   "claude-sonnet-4-0": "sonnet",
-  haiku: "haiku",
+  haiku: "claude-haiku-5-5",
+  "haiku-5.5": "claude-haiku-5-5",
+  "claude-haiku-5-5": "claude-haiku-5-5",
   "haiku-3.5": "haiku",
   "claude-haiku-3-5": "haiku",
 };

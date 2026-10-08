@@ -2478,7 +2478,7 @@ for usage/billing and raise limits as needed.
           models: {
             "anthropic/claude-opus-4-6": { alias: "opus" },
             "anthropic/claude-sonnet-4-6": { alias: "sonnet" },
-            "anthropic/claude-haiku-4-5": { alias: "haiku" },
+            "anthropic/claude-haiku-5-5": { alias: "haiku" },
           },
         },
       },

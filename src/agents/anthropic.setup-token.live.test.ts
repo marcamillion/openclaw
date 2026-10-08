@@ -145,7 +145,7 @@ function pickModel(models: Array<Model<Api>>, raw?: string): Model<Api> | null {
     "claude-sonnet-4-6",
     "claude-sonnet-4-6",
     "claude-sonnet-4-0",
-    "claude-haiku-3-5",
+    "claude-haiku-5-5",
   ];
   for (const id of preferred) {
     const match = models.find((model) => model.id === id);
