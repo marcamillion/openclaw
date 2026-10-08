@@ -245,7 +245,7 @@ export function priceHaikuUsage(usage: Usage, cacheTtl: "5m" | "1h" = "5m"): voi
 function createHaikuStreamWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
-    if (model.id !== "claude-haiku-5-5" || model.api !== "anthropic-messages") {
+    if (model.id.trim().toLowerCase() !== "claude-haiku-5-5" || model.api !== "anthropic-messages") {
       return underlying(model, context, options);
     }
     let cacheTtl: "5m" | "1h" = "5m";
@@ -257,7 +257,7 @@ function createHaikuStreamWrapper(baseStreamFn: StreamFn | undefined): StreamFn 
       if (options?.reasoning) {
         payload.output_config = {
           ...(payload.output_config as Record<string, unknown> | undefined),
-          effort: options.reasoning === "minimal" ? "low" : options.reasoning,
+          effort: options.reasoning === "minimal" ? "low" : options.reasoning === "xhigh" ? "high" : options.reasoning,
         };
       }
       // The older SDK adds a thinking budget to max_tokens. Adaptive uses the caller's ceiling.
@@ -331,7 +331,7 @@ export function wrapAnthropicProviderStream(
   const fastMode = resolveAnthropicFastMode(ctx.extraParams);
   return composeProviderStreamWrappers(
     ctx.streamFn,
-    ctx.modelId === "claude-haiku-5-5" ? createHaikuStreamWrapper : undefined,
+    ctx.modelId.trim().toLowerCase() === "claude-haiku-5-5" ? createHaikuStreamWrapper : undefined,
     anthropicBetas?.length
       ? (streamFn) => createAnthropicBetaHeadersWrapper(streamFn, anthropicBetas)
       : undefined,

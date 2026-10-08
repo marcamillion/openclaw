@@ -73,6 +73,24 @@ describe("anthropic stream wrappers", () => {
     expect(captured.payload?.thinking).not.toHaveProperty("budget_tokens");
   });
 
+  it.each(["claude-haiku-5-5", " Claude-Haiku-5-5 "])("normalizes %s registration and clamps xhigh effort", (modelId) => {
+    let payload: Record<string, unknown> = {};
+    const base: StreamFn = (model, _context, options) => {
+      payload = { temperature: 0, top_p: 0.9, top_k: 5 };
+      options?.onPayload?.(payload as never, model as never);
+      const stream = createAssistantMessageEventStream();
+      stream.end();
+      return stream;
+    };
+    const wrapped = wrapAnthropicProviderStream({ streamFn: base, modelId } as never);
+    wrapped?.({ id: modelId, provider: "anthropic", api: "anthropic-messages" } as never,
+      {} as never, { reasoning: "xhigh" } as never);
+    expect(payload).toMatchObject({ thinking: { type: "adaptive" }, output_config: { effort: "high" } });
+    for (const key of ["temperature", "top_p", "top_k"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+  });
+
   it("explicitly disables Haiku 5.5 thinking when the caller turns it off", () => {
     let payload: Record<string, unknown> = {};
     const base: StreamFn = (model, _context, options) => {
